@@ -1,0 +1,193 @@
+<link rel="import" href="../polymer/polymer.html">
+<link rel="import" href="registration-fields.html">
+
+<dom-module id="iris-registration-desk">
+  <template>
+    <style>
+      :host {
+        display: block;
+      }
+
+    </style>
+
+    <iris-call-center id="callcenter" terminals="{{terminals}}"></iris-call-center>
+
+    <iris-shared-entities id="departments" namespace="departments"></iris-shared-entities>
+    <iris-shared-entities id="services" namespace="services"></iris-shared-entities>
+
+    <div id="terminal-list">
+
+      <paper-dropdown-menu label="Терминал">
+        <paper-listbox class="dropdown-content" selected="{{selectedTerminal}}">
+          <template is="dom-repeat" items="[[terminals]]" as="terminal">
+            <paper-item >[[terminal.workstation.label]]</paper-item>
+          </template>
+        </paper-listbox>
+      </paper-dropdown-menu>
+
+      <div>
+        [[terminalsOffice(terminal)]]
+      </div>
+    </div>
+
+    <div id="services-list">
+      <paper-input label="Название услуги" value="{{sgfilter}}"></paper-input>
+      <paper-listbox class="list" selected-item="{{selectedService}}">
+        <template id="visibleServices" is="dom-repeat" items="[[terminal.views.base.root.content]]" filter="[[makeServiceFilter(sgfilter)]]">
+          <paper-item>
+            [[serviceLabel(item)]]
+          </paper-item>
+        </template>
+      </paper-listbox>
+    </div>
+
+    <div id="user-fields">
+      <registration-feilds service="[[service]]" fields-model="[[fieldsModel]]" service-fields="{{serviceFields}}" terminal="[[terminal]]"></registration-feilds>
+    </div>
+
+  </template>
+  <script>
+    Polymer({
+      is: 'iris-registration-desk',
+      properties: {
+        terminals: {
+          type: Array,
+          observer: "_terminalsChanged"
+        },
+        terminal: {
+          type: Object,
+          computed: "_computeTerminal(selectedTerminal, terminals)"
+        },
+        service: {
+          type: Object,
+          computed: "_computeService(selectedService,terminal)"
+        },
+        booking_method: {
+          value: 'prebook',
+          type: String
+        },
+        fieldsModel: {
+          type: Array,
+          computed: "_modelByMethod(terminal.fields_model,booking_method,service.id)"
+        },
+        monthFromNow: {
+          type: Number,
+          value: 0
+        },
+        serviceFields: {
+          type: Object,
+          value: {}
+        }
+      },
+      makeServiceFilter(sgfilter) {
+        let string = sgfilter.toLowerCase();
+
+        return (item) => {
+          if (!string)
+            return true;
+          let label = this.serviceLabel(item).toLowerCase();
+
+          return ! !~ label.indexOf(string);
+        };
+      },
+      _terminalsChanged() {
+        this.set('selectedTerminal', 0);
+      },
+      _computeService(selectedService, terminal) {
+        let service = this.$.visibleServices.itemForElement(selectedService);
+
+        return service;
+      },
+      _computeTerminal(selectedTerminal, terminals) {
+        if (_.isEmpty(terminals))
+          return {};
+
+        return terminals[selectedTerminal];
+      },
+      terminalsOffice(terminal) {
+        if (_.isEmpty(terminal))
+          return;
+
+        let department_id = terminal.workstation.attached_to;
+        let department = this.$.departments.get(department_id);
+
+        return department.label;
+      },
+      serviceLabel(item) {
+        if (!item)
+          return;
+
+        let service = this.$.services.get(item.id);
+
+        return service
+          ? service.label
+          : item.id;
+      },
+      _modelByMethod(fields_model, booking_method, service) {
+        let fields = this.modelByMethod(fields_model, booking_method, service);
+
+        return _.map(fields, (field, index) => {
+          field.key = field.key || index;
+          return field;
+        });
+      },
+      modelByMethod(fieldsModel, booking_method, current_service_id) {
+
+        let comon_model = _.reduce(fieldsModel, (r, field, name) => {
+          if ((!field.method || field.method === booking_method) && (field.include !== false))
+            r[name] = field;
+          return r;
+        }, {});
+
+        if (!current_service_id)
+          return comon_model;
+
+        let service_array = _.castArray(current_service_id);
+        let servicesMap = this.$.services;
+        let services_fields = _.map(service_array, id => servicesMap.get(id).custom_fields);
+
+        let ext_model = {};
+        if (!_.isArray(current_service_id)) {
+          ext_model = comon_model
+        } else {
+          let multi_fields_list = ['service_count'];
+
+          _.forEach(comon_model, (field, name) => {
+            let key = field.key || name;
+            if (!~ multi_fields_list.indexOf(key)) {
+              ext_model[name] = field;
+              return true;
+            }
+
+            _.forEach(current_service_id, (id, index) => {
+              let new_name = `${name}-${id}`;
+              let multi_field = _.cloneDeep(field);
+              multi_field.selected_service = index;
+              multi_field.key = key;
+              ext_model[new_name] = multi_field;
+            });
+          });
+
+        }
+
+        //@NOTE: may had bug here if services has two equal fields with different logic
+        let custom_fields = _.defaults.apply(_, services_fields);
+
+        if (_.isEmpty(custom_fields))
+          return ext_model;
+
+        _.forEach(custom_fields, (field, name) => {
+          if (field === false) {
+            delete ext_model[name];
+          } else if (field === true && fieldsModel[name]) {
+            ext_model[name] = fieldsModel[name];
+          } else if (_.isPlainObject(field))
+            ext_model[name] = field;
+          }
+        );
+
+        return ext_model;
+      }
+    });
+  </script>
+</dom-module>

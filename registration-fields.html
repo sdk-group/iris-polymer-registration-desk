@@ -1,0 +1,124 @@
+<link rel="import" href="../polymer/polymer.html">
+
+<dom-module id="registration-feilds">
+  <template>
+    <style>
+      :host {
+        display: block;
+      }
+
+    </style>
+    <iris-call-center id="callcenter"></iris-call-center>
+
+    <template is="dom-repeat" items="[[fieldsModel]]">
+      <template is="dom-if" if="[[isDatePicker(item)]]">
+        <div id="date-picker">
+          <paper-icon-button disabled$="[[canPrevMonth(monthFromNow)]]" on-tap="prevMonth" icon="chevron-left"></paper-icon-button>
+          <div id="calendar-widget">
+            [[monthName(monthFromNow)]]
+            <iris-date-picker id="picker" hide-month-picker date="{{pickerDate}}" available-days="{{availableDays}}" selected="{{dedicatedDate}}"></iris-date-picker>
+          </div>
+          <paper-icon-button disabled$="[[canNextMonth(monthFromNow,isLastAvailable)]]" on-tap="nextMonth" icon="chevron-right"></paper-icon-button>
+        </div>
+      </template>
+      <template is="dom-if" if="[[!isDatePicker(item)]]">
+        <paper-input label="[[item.description]]" on-keyup="fieldChanged"></paper-input>
+      </template>
+    </template>
+
+  </template>
+  <script>
+    Polymer({
+      is: 'registration-feilds',
+      properties: {
+        serviceFields: {
+          type: Object,
+          value: {}
+        },
+        fieldsModel: {
+          type: Array
+        },
+        service: {
+          type: Object
+        },
+        terminal: {
+          type: Object
+        },
+        monthFromNow: {
+          type: Number,
+          value: 0
+        }
+      },
+      observers: ['getAvailableDays(service,serviceFields.service_count,monthFromNow)'],
+
+      fieldChanged(e) {
+        let item = e.model.item;
+        let key = item.key;
+
+        this.set('serviceFields.' + key, e.target.value);
+      },
+      getAvailableDays(service, serviceCount) {
+        console.log('getAvailableDays', service, serviceCount);
+        let info = this.monthInfo(this.monthFromNow);
+
+        // this.$.picker.selections = [];
+        this.pickerDate = info.now;
+        this.ticketQuery = this.ticketQuery || {};
+        this.ticketQuery.service = service.id;
+        this.ticketQuery.service_count = serviceCount;
+        this.ticketQuery.workstation = this.terminal.workstation.id;
+        this.ticketQuery.start = this.monthFromNow === 0
+          ? 0
+          : this.ticketQuery.end + 1;
+
+        this.ticketQuery.end = this.monthFromNow === 0
+          ? info.days_in_month - info.day
+          : info.days_in_month + this.ticketQuery.end + 1;
+
+        return this.$.callcenter.prebookAvailable(this.ticketQuery).then(data => this.processAvailableDays(data));
+      },
+      processAvailableDays(data) {
+        this.isLastAvailable = !data.done;
+        this.availableDays = _.reduce(data.days, (acc, day) => {
+          if (day.is_available)
+            acc.push(day.date.slice(0, 10));
+          return acc;
+        }, []);
+        this.dedicatedDate = null;
+      },
+      monthInfo(month_offset) {
+        let now = moment();
+        now.add(month_offset, 'months');
+        let month = now.format('M');
+        let year = now.format('GGGG');
+        let day = now.format('D');
+        let days_in_month = new Date(year, month, 0).getDate();
+        return {now, days_in_month, day, year, month};
+      },
+      canPrevMonth(x) {
+        return x <= 0;
+      },
+      canNextMonth() {
+        return !this.isLastAvailable;
+      },
+      prevMonth() {
+        this.makeDate(-1);
+      },
+      nextMonth() {
+        this.makeDate(1);
+      },
+      makeDate(v) {
+        this.dedicatedDate = null;
+        this.monthFromNow = this.monthFromNow + v;
+        this.pirckerDate = moment().add(this.monthFromNow, 'month');
+      },
+      monthName() {
+        return moment().add(this.monthFromNow, 'month').format('MMMM')
+      },
+      isDatePicker(item) {
+        return item.type == "date-picker";
+      },
+      reset() {}
+    });
+  </script>
+</dom-module>
