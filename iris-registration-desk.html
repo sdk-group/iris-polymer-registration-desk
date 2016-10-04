@@ -8,14 +8,83 @@
         display: block;
       }
 
+      #terminal-list {
+        @apply(--layout-horizontal);
+        @apply(--layout-end);
+        width: 100%;
+        margin-bottom: 10px;
+        padding: 0 10px;
+      }
+
+      #office-name {
+        padding-bottom: 5px;
+        padding-left: 15px;
+        font-size: 1.2em;
+      }
+
+      #services-list {
+        width: 100%;
+        padding: 10px;
+        margin-bottom: 10px;
+      }
+
+      #services-list paper-listbox {
+        max-height: 30vh;
+        overflow: auto;
+      }
+
+      #collapseControl iron-icon {
+        float: right;
+      }
+
+      #collapseControl {
+        padding: 5px 0;
+        border-bottom: 1px solid var(--mydoc-red-800);
+      }
+
+      #ticketDialog {
+        @apply(--layout-vertical);
+        width: 100%;
+        top: 64px;
+        bottom: 0;
+        margin: 0;
+        border-top: 3px solid #E44E34;
+      }
+
+      .dialog-head {
+        font-size: 19px;
+        padding-left: 15px;
+        margin: 10px 0;
+        min-height: 40px;
+        @apply(--layout-horizontal);
+        @apply(--layout-justified);
+      }
+
+      paper-fab {
+        border-radius: 3px;
+        background-color: rgba(0, 0, 0, 0.0);
+        border: 3px solid #6E4D44;
+        color: #6E4D44;
+      }
+
     </style>
+    <paper-dialog id="ticketDialog" entry-animation="slide-from-left-animation" exit-animation="slide-left-animation" on-ticket-action="ticketAction">
+      <div class='dialog-head'>
+        <paper-fab class="flat" mini icon="chevron-left" elevation="0" on-tap="closeList"></paper-fab>
+      </div>
+
+      <div id="ticket-dialog-wrapper">
+        <iris-ticketview id="viewer" hidden$="[[hasTicket(selectedTicket)]]" ticket="{{selectedTicket}}" override="[[override_actions]]" view="detail"></iris-ticketview>
+      </div>
+
+    </paper-dialog>
 
     <iris-call-center id="callcenter" terminals="{{terminals}}"></iris-call-center>
 
     <iris-shared-entities id="departments" namespace="departments"></iris-shared-entities>
     <iris-shared-entities id="services" namespace="services"></iris-shared-entities>
 
-    <div id="terminal-list">
+    <paper-card id="terminal-list">
 
       <paper-dropdown-menu label="Терминал">
         <paper-listbox class="dropdown-content" selected="{{selectedTerminal}}">
@@ -25,26 +94,36 @@
         </paper-listbox>
       </paper-dropdown-menu>
 
-      <div>
+      <div id="office-name">
         [[terminalsOffice(terminal)]]
       </div>
-    </div>
+    </paper-card>
 
-    <div id="services-list">
-      <paper-input label="Название услуги" value="{{sgfilter}}"></paper-input>
-      <paper-listbox class="list" selected-item="{{selectedService}}">
-        <template id="visibleServices" is="dom-repeat" items="[[terminal.views.base.root.content]]" filter="[[makeServiceFilter(sgfilter)]]">
-          <paper-item>
-            [[serviceLabel(item)]]
-          </paper-item>
-        </template>
-      </paper-listbox>
-    </div>
+    <paper-card id="services-list">
+      <div id="collapseControl" on-tap="toggleServiceList">
+        Услуга: [[getSelectedServiceName(service)]]
+        <iron-icon icon="[[toggleIcon]]"></iron-icon>
+      </div>
+      <iron-collapse id="collapse" opened>
+        <paper-input label="Название услуги" value="{{sgfilter}}"></paper-input>
+        <paper-listbox class="list" selected-item="{{selectedService}}">
+          <template id="visibleServices" is="dom-repeat" items="[[terminal.views.base.root.content]]" filter="[[makeServiceFilter(sgfilter)]]">
+            <paper-item>
+              [[serviceLabel(item)]]
+            </paper-item>
+          </template>
+        </paper-listbox>
+      </iron-collapse>
+    </paper-card>
 
     <div id="user-fields">
-      <registration-feilds service="[[service]]" fields-model="[[fieldsModel]]" service-fields="{{serviceFields}}" terminal="[[terminal]]"></registration-feilds>
+      <registration-feilds service="[[service]]" fields-model="[[fieldsModel]]" service-fields="{{serviceFields}}" terminal="[[terminal]]" ticket-query="{{ticketQuery}}">
+        <paper-button raised on-tap="register">Зарегистрировать</paper-button>
+      </registration-feilds>
+
     </div>
 
+    <paper-toast id="error" text="Невозможно зарегистрировать талон"></paper-toast>
   </template>
   <script>
     Polymer({
@@ -90,11 +169,38 @@
           return ! !~ label.indexOf(string);
         };
       },
+      ready() {
+        this.toggleIcon = "expand-less";
+      },
+      register() {
+        this.ticketQuery.workstation = this.terminal.workstation.id;
+
+        return this.$.callcenter.confirm(this.ticketQuery, false).then(response => {
+
+          if (!response.success) {
+            this.$.error.open();
+            return;
+          }
+
+          let ticket = response.ticket;
+          this.set('selectedTicket', ticket);
+          this.$.ticketDialog.open();
+        });
+      },
+
+      closeList() {
+        this.$.ticketDialog.close();
+      },
+      hasTicket(selectedTicket) {
+        return _.isEmpty(selectedTicket);
+      },
       _terminalsChanged() {
         this.set('selectedTerminal', 0);
       },
       _computeService(selectedService, terminal) {
         let service = this.$.visibleServices.itemForElement(selectedService);
+        this.set('ticketQuery.service', service.id);
+        this.set('ticketQuery.service_count', 1);
 
         return service;
       },
@@ -122,6 +228,18 @@
         return service
           ? service.label
           : item.id;
+      },
+      toggleServiceList() {
+        this.$.collapse.toggle();
+        this.toggleIcon = this.toggleIcon == "expand-less"
+          ? "expand-more"
+          : "expand-less";
+      },
+      getSelectedServiceName(selectedService) {
+        if (!selectedService)
+          return '-';
+
+        return this.serviceLabel(selectedService);
       },
       _modelByMethod(fields_model, booking_method, service) {
         let fields = this.modelByMethod(fields_model, booking_method, service);

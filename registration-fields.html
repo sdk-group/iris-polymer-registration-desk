@@ -4,35 +4,107 @@
   <template>
     <style>
       :host {
-        display: block;
+        @apply(--layout-horizontal);
+      }
+
+      #other-fields {
+        @apply(--layout-flex);
+        @apply(--layout-vertical);
+        margin-left: 10px;
+        padding: 10px;
+        overflow: hidden;
+        padding-bottom: 0;
+      }
+
+      #date-picker > div {
+        @apply(--layout-horizontal);
+        @apply(--layout-center);
+        @apply(--layout-justified);
+        background-color: var(--mydoc-beige-1000);
+        font-size: 1.2em;
+        color: white;
+      }
+
+      paper-icon-button[disabled] {
+        visibility: hidden;
+      }
+
+      #time-picker {
+        @apply(--layout-horizontal);
+        @apply(--layout-flex);
+      }
+      .buttons {
+        box-shadow: 0 1px 3px 0 #aaa;
+        border-top: 1px solid #ccc;
+        padding: 10px;
+        @apply(--layout-horizontal);
+        @apply(--layout-end-justified);
+        margin: 0 -10px;
+      }
+
+      #end-time {
+        font-size: 1.2em;
+        padding-top: 30px;
+        margin-left: 30px;
       }
 
     </style>
     <iris-call-center id="callcenter"></iris-call-center>
 
-    <template is="dom-repeat" items="[[fieldsModel]]">
-      <template is="dom-if" if="[[isDatePicker(item)]]">
-        <div id="date-picker">
-          <paper-icon-button disabled$="[[canPrevMonth(monthFromNow)]]" on-tap="prevMonth" icon="chevron-left"></paper-icon-button>
-          <div id="calendar-widget">
-            [[monthName(monthFromNow)]]
-            <iris-date-picker id="picker" hide-month-picker date="{{pickerDate}}" available-days="{{availableDays}}" selected="{{dedicatedDate}}"></iris-date-picker>
-          </div>
-          <paper-icon-button disabled$="[[canNextMonth(monthFromNow,isLastAvailable)]]" on-tap="nextMonth" icon="chevron-right"></paper-icon-button>
-        </div>
-      </template>
-      <template is="dom-if" if="[[!isDatePicker(item)]]">
+    <paper-card id="date-picker">
+      <div>
+        <paper-icon-button disabled$="[[canPrevMonth(monthFromNow)]]" on-tap="prevMonth" icon="chevron-left"></paper-icon-button>
+        [[monthName(monthFromNow)]]
+        <paper-icon-button disabled$="[[canNextMonth(monthFromNow,isLastAvailable)]]" on-tap="nextMonth" icon="chevron-right"></paper-icon-button>
+      </div>
+      <iris-date-picker id="picker" hide-month-picker date="{{pickerDate}}" available-days="{{availableDays}}" selected="{{ticketQuery.dedicated_date}}"></iris-date-picker>
+    </paper-card>
+
+    <paper-card id="other-fields">
+      <paper-input label="Количество дел" value="{{ticketQuery.service_count}}"></paper-input>
+
+      <template is="dom-repeat" items="[[fieldsModel]]" filter="otherFields">
         <paper-input label="[[item.description]]" on-keyup="fieldChanged"></paper-input>
       </template>
-    </template>
+
+      <div id="time-picker">
+        <div id="start-time">
+          <paper-dropdown-menu label="Часы">
+            <paper-listbox class="dropdown-content" selected="{{hour}}" attr-for-selected="time">
+              <template is="dom-repeat" items="[[getHours(slots)]]">
+                <paper-item time$="[[item]]">[[item]]</paper-item>
+              </template>
+            </paper-listbox>
+          </paper-dropdown-menu>
+
+          <paper-dropdown-menu id="minutes" label="Минуты">
+            <paper-listbox class="dropdown-content" selected="{{minute}}">
+              <template id="selectedTime" is="dom-repeat" items="[[pickedHour(slots, hour)]]">
+                <paper-item >[[item.start.minute]]</paper-item>
+              </template>
+            </paper-listbox>
+          </paper-dropdown-menu>
+        </div>
+
+        <div id="end-time">
+          [[endTime(minute,hour)]]
+        </div>
+      </div>
+
+      <div class="buttons">
+        <content></content>
+      </div>
+    </paper-card>
 
   </template>
   <script>
     Polymer({
       is: 'registration-feilds',
       properties: {
-        serviceFields: {
+        ticketQuery: {
           type: Object,
+          notify: true,
+
           value: {}
         },
         fieldsModel: {
@@ -49,13 +121,25 @@
           value: 0
         }
       },
-      observers: ['getAvailableDays(service,serviceFields.service_count,monthFromNow)'],
+      observers: [
+        'getAvailableDays(service,ticketQuery.service_count,monthFromNow)', //
+        'getSlots(ticketQuery.dedicated_date,ticketQuery.service_count)', //
+        'updateTicketQuery(minute)'
+      ],
+      updateTicketQuery(minute) {
+        if (minute === '')
+          return;
+        let selected = _.get(this.$.selectedTime, ['items', minute]);
+        if (_.isEmpty(selected))
+          return;
 
+        this.set('ticketQuery.time_description', [selected.start.raw, selected.end.raw]);
+      },
       fieldChanged(e) {
         let item = e.model.item;
         let key = item.key;
 
-        this.set('serviceFields.' + key, e.target.value);
+        this.set('ticketQuery.client.' + key, e.target.value);
       },
       getAvailableDays(service, serviceCount) {
         console.log('getAvailableDays', service, serviceCount);
@@ -63,10 +147,8 @@
 
         // this.$.picker.selections = [];
         this.pickerDate = info.now;
-        this.ticketQuery = this.ticketQuery || {};
-        this.ticketQuery.service = service.id;
-        this.ticketQuery.service_count = serviceCount;
         this.ticketQuery.workstation = this.terminal.workstation.id;
+
         this.ticketQuery.start = this.monthFromNow === 0
           ? 0
           : this.ticketQuery.end + 1;
@@ -84,7 +166,7 @@
             acc.push(day.date.slice(0, 10));
           return acc;
         }, []);
-        this.dedicatedDate = null;
+        // this.set('ticketQuery.dedicated_date', null);
       },
       monthInfo(month_offset) {
         let now = moment();
@@ -108,7 +190,7 @@
         this.makeDate(1);
       },
       makeDate(v) {
-        this.dedicatedDate = null;
+        this.set('ticketQuery.dedicated_date', null);
         this.monthFromNow = this.monthFromNow + v;
         this.pirckerDate = moment().add(this.monthFromNow, 'month');
       },
@@ -118,6 +200,56 @@
       isDatePicker(item) {
         return item.type == "date-picker";
       },
+      otherFields(item) {
+        return item.type != "date-picker" && item.type != "input-number";
+      },
+      pickedHour(slots, hour) {
+        if (!slots[hour]) 
+          return [];
+        this.set('minute', -1);
+        this.async(() => {
+          this.set('minute', 0);
+        }, 100);
+
+        return slots[hour];
+      },
+      getSlots() {
+        return this.$.callcenter.getDaySlots(this.ticketQuery).then(response => {
+          let result = response.success && _.chain(response.slots). //
+          map('time_description'). //
+          map(item => ({
+            start: this.slotText(item[0]),
+            end: this.slotText(item[1])
+          })). //
+          groupBy('start.hour'). //
+          value();
+          this.set("hour", null);
+          this.set('slots', result);
+        });
+      },
+      getHours(slots) {
+        return _.keys(slots).sort();
+      },
+      endTime(min) {
+        if (min === '')
+          return '';
+
+        let end = _.get(this.$.selectedTime, ['items', min, 'end']);
+
+        return end
+          ? `Время завершения: ${end.hour}:${end.minute}`
+          : '';
+      },
+      slotText(t) {
+
+        let ts = {
+          hour: _.padStart(((t / 3600) | 0), 2, '0'),
+          minute: _.padStart(((t % 3600) / 60) | 0, 2, '0'),
+          raw: t
+        };
+        return ts;
+      },
+
       reset() {}
     });
   </script>
