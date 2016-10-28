@@ -31,8 +31,9 @@
 
       #time-picker {
         @apply(--layout-horizontal);
-        @apply(--layout-flex);
+        @apply(--layout-flex-auto);
       }
+
       .buttons {
         box-shadow: 0 1px 3px 0 #aaa;
         border-top: 1px solid #ccc;
@@ -48,6 +49,10 @@
         margin-left: 30px;
       }
 
+      #start-time paper-dropdown-menu {
+        padding-right: 10px;
+      }
+
     </style>
     <iris-call-center id="callcenter"></iris-call-center>
 
@@ -57,27 +62,27 @@
         [[monthName(monthFromNow)]]
         <paper-icon-button disabled$="[[canNextMonth(monthFromNow,isLastAvailable)]]" on-tap="nextMonth" icon="chevron-right"></paper-icon-button>
       </div>
-      <iris-date-picker id="picker" hide-month-picker date="{{pickerDate}}" available-days="{{availableDays}}" selected="{{ticketQuery.dedicated_date}}"></iris-date-picker>
+      <iris-date-picker id="picker" hide-month-picker date="{{pickerDate}}" selection-enabled="{{selectionEnabled}}" available-days="{{availableDays}}" selected="{{ticketQuery.dedicated_date}}"></iris-date-picker>
     </paper-card>
 
     <paper-card id="other-fields">
       <paper-input label="Количество дел" value="{{ticketQuery.service_count}}"></paper-input>
 
       <template is="dom-repeat" items="[[fieldsModel]]" filter="otherFields">
-        <paper-input label="[[item.description]]" on-keyup="fieldChanged"></paper-input>
+        <paper-input class="custom-field" label="[[item.description]]" on-keyup="fieldChanged"></paper-input>
       </template>
 
       <div id="time-picker">
         <div id="start-time">
-          <paper-dropdown-menu label="Часы">
-            <paper-listbox class="dropdown-content" selected="{{hour}}" attr-for-selected="time">
-              <template is="dom-repeat" items="[[getHours(slots)]]">
+          <paper-dropdown-menu label="Часы" disabled$="[[!selectionEnabled]]">
+            <paper-listbox class="dropdown-content" selected="{{hour}}">
+              <template id="hours" is="dom-repeat" items="[[getHours(slots)]]">
                 <paper-item time$="[[item]]">[[item]]</paper-item>
               </template>
             </paper-listbox>
           </paper-dropdown-menu>
 
-          <paper-dropdown-menu id="minutes" label="Минуты">
+          <paper-dropdown-menu id="minutes" label="Минуты" disabled$="[[!selectionEnabled]]">
             <paper-listbox class="dropdown-content" selected="{{minute}}">
               <template id="selectedTime" is="dom-repeat" items="[[pickedHour(slots, hour)]]">
                 <paper-item >[[item.start.minute]]</paper-item>
@@ -106,6 +111,11 @@
           notify: true,
 
           value: {}
+        },
+        selectionEnabled: {
+          type: Boolean,
+          notify: true,
+          value: false
         },
         fieldsModel: {
           type: Array
@@ -139,10 +149,9 @@
         let item = e.model.item;
         let key = item.key;
 
-        this.set('ticketQuery.client.' + key, e.target.value);
+        this.set('ticketQuery.' + key, e.target.value);
       },
       getAvailableDays(service, serviceCount) {
-        console.log('getAvailableDays', service, serviceCount);
         let info = this.monthInfo(this.monthFromNow);
 
         // this.$.picker.selections = [];
@@ -203,8 +212,10 @@
       otherFields(item) {
         return item.type != "date-picker" && item.type != "input-number";
       },
-      pickedHour(slots, hour) {
-        if (!slots[hour]) 
+      pickedHour(slots, index) {
+        let hour = this.$.hours.items[index];
+
+        if (!slots[hour])
           return [];
         this.set('minute', -1);
         this.async(() => {
@@ -250,7 +261,14 @@
         return ts;
       },
 
-      reset() {}
+      reset() {
+        this.set("monthFromNow", 0);
+        this.$.picker.reset();
+        this.set("hour", null);
+
+        let fields = this.$["other-fields"].querySelectorAll('.custom-field');
+        _.forEach(fields, field => field.set('value', ''))
+      }
     });
   </script>
 </dom-module>

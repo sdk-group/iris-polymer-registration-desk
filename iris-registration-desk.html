@@ -6,6 +6,14 @@
     <style>
       :host {
         display: block;
+        --iris-ticketview-ticket: {
+          border: none;
+          width: 100%;
+        };
+        --iris-ticketview-actions: {
+          border: none;
+          display: none;
+        };
       }
 
       #terminal-list {
@@ -26,10 +34,13 @@
         width: 100%;
         padding: 10px;
         margin-bottom: 10px;
+        height: calc(100vh - 202px);
+        @apply(--layout-vertical);
+        padding-bottom: 0;
       }
 
       #services-list paper-listbox {
-        max-height: 30vh;
+        /*max-height: 30vh;*/
         overflow: auto;
       }
 
@@ -67,6 +78,23 @@
         color: #6E4D44;
       }
 
+      .buttons {
+        box-shadow: 0 1px 3px 0 #aaa;
+        border-top: 1px solid #ccc;
+        padding: 10px;
+        @apply(--layout-horizontal);
+        @apply(--layout-end-justified);
+        margin: 0 -10px;
+      }
+
+      paper-listbox {
+        @apply(--layout-flex);
+      }
+
+      #terminal-list paper-dropdown-menu {
+        width: 100%;
+      }
+
     </style>
     <paper-dialog id="ticketDialog" entry-animation="slide-from-left-animation" exit-animation="slide-left-animation" on-ticket-action="ticketAction">
       <div class='dialog-head'>
@@ -74,7 +102,9 @@
       </div>
 
       <div id="ticket-dialog-wrapper">
-        <iris-ticketview id="viewer" hidden$="[[hasTicket(selectedTicket)]]" ticket="{{selectedTicket}}" override="[[override_actions]]" view="detail"></iris-ticketview>
+        <h3>[[terminalsOffice(terminal)]]</h3>
+
+        <iris-ticketview id="viewer" hidden$="[[hasTicket(selectedTicket)]]" ticket="{{selectedTicket}}" override="[[override_actions]]" view="register"></iris-ticketview>
       </div>
 
     </paper-dialog>
@@ -83,45 +113,49 @@
 
     <iris-shared-entities id="departments" namespace="departments"></iris-shared-entities>
     <iris-shared-entities id="services" namespace="services"></iris-shared-entities>
+    <iron-pages selected="[[page]]">
+      <div id="first-page">
+        <paper-card id="terminal-list">
 
-    <paper-card id="terminal-list">
+          <paper-dropdown-menu>
+            <paper-listbox class="dropdown-content" selected="{{selectedTerminal}}">
+              <template is="dom-repeat" items="[[terminals]]" as="terminal">
+                <paper-item >[[terminal.workstation.label]]</paper-item>
+              </template>
+            </paper-listbox>
+          </paper-dropdown-menu>
 
-      <paper-dropdown-menu label="Терминал">
-        <paper-listbox class="dropdown-content" selected="{{selectedTerminal}}">
-          <template is="dom-repeat" items="[[terminals]]" as="terminal">
-            <paper-item >[[terminal.workstation.label]]</paper-item>
-          </template>
-        </paper-listbox>
-      </paper-dropdown-menu>
+        </paper-card>
 
-      <div id="office-name">
-        [[terminalsOffice(terminal)]]
+        <paper-card id="services-list">
+          <div id="collapseControl">
+            Услуга: [[getSelectedServiceName(service)]]
+          </div>
+          <paper-input label="Название услуги" value="{{sgfilter}}"></paper-input>
+          <paper-listbox class="list" selected-item="{{selectedService}}">
+            <template id="visibleServices" is="dom-repeat" items="[[terminal.views.base.root.content]]" filter="[[makeServiceFilter(sgfilter)]]">
+              <paper-item>
+                [[serviceLabel(item)]]
+              </paper-item>
+            </template>
+          </paper-listbox>
+
+          <div class="buttons">
+            <paper-button on-tap="nextPage" disabled="[[!canNext(service)]]" raised>Далее</paper-button>
+          </div>
+        </paper-card>
+
       </div>
-    </paper-card>
+      <div>
+        <div id="user-fields">
+          <registration-feilds id="fields" service="[[service]]" fields-model="[[fieldsModel]]" selection-enabled="{{selectionEnabled}}" service-fields="{{serviceFields}}" terminal="[[terminal]]" ticket-query="{{ticketQuery}}">
+            <paper-button on-tap="prevPage" raised>Назад</paper-button>
+            <paper-button raised on-tap="register" disabled$="[[!selectionEnabled]]">Зарегистрировать</paper-button>
+          </registration-feilds>
 
-    <paper-card id="services-list">
-      <div id="collapseControl" on-tap="toggleServiceList">
-        Услуга: [[getSelectedServiceName(service)]]
-        <iron-icon icon="[[toggleIcon]]"></iron-icon>
+        </div>
       </div>
-      <iron-collapse id="collapse" opened>
-        <paper-input label="Название услуги" value="{{sgfilter}}"></paper-input>
-        <paper-listbox class="list" selected-item="{{selectedService}}">
-          <template id="visibleServices" is="dom-repeat" items="[[terminal.views.base.root.content]]" filter="[[makeServiceFilter(sgfilter)]]">
-            <paper-item>
-              [[serviceLabel(item)]]
-            </paper-item>
-          </template>
-        </paper-listbox>
-      </iron-collapse>
-    </paper-card>
-
-    <div id="user-fields">
-      <registration-feilds service="[[service]]" fields-model="[[fieldsModel]]" service-fields="{{serviceFields}}" terminal="[[terminal]]" ticket-query="{{ticketQuery}}">
-        <paper-button raised on-tap="register">Зарегистрировать</paper-button>
-      </registration-feilds>
-
-    </div>
+    </iron-pages>
 
     <paper-toast id="error" text="Невозможно зарегистрировать талон"></paper-toast>
   </template>
@@ -139,7 +173,8 @@
         },
         service: {
           type: Object,
-          computed: "_computeService(selectedService,terminal)"
+          computed: "_computeService(selectedService,terminal)",
+          value: false
         },
         booking_method: {
           value: 'prebook',
@@ -171,25 +206,48 @@
       },
       ready() {
         this.toggleIcon = "expand-less";
+        this.page = 0;
+      },
+      canNext(service) {
+        return !_.isEmpty(service)
       },
       register() {
         this.ticketQuery.workstation = this.terminal.workstation.id;
 
-        return this.$.callcenter.confirm(this.ticketQuery, false).then(response => {
+        return this.$.callcenter.confirm(this.ticketQuery, false, this.fieldsModel).then(response => {
+          console.log('Response:', response);
 
           if (!response.success) {
             this.$.error.open();
             return;
           }
 
-          let ticket = response.ticket;
+          let ticket = _.isArray(response.ticket)
+            ? _.head(response.ticket)
+            : response.ticket;
           this.set('selectedTicket', ticket);
           this.$.ticketDialog.open();
         });
       },
-
       closeList() {
+        this.set('page', 0);
         this.$.ticketDialog.close();
+      },
+      nextPage() {
+        _.forEach(this.ticketQuery, (field, name) => {
+          if (name == 'service')
+            return true;
+
+          this.set('ticketQuery.' + name, undefined);
+        });
+
+        this.set('ticketQuery.service_count', 1);
+
+        this.$.fields.reset();
+        this.set('page', 1);
+      },
+      prevPage() {
+        this.set('page', 0);
       },
       hasTicket(selectedTicket) {
         return _.isEmpty(selectedTicket);
@@ -200,14 +258,12 @@
       _computeService(selectedService, terminal) {
         let service = this.$.visibleServices.itemForElement(selectedService);
         this.set('ticketQuery.service', service.id);
-        this.set('ticketQuery.service_count', 1);
 
         return service;
       },
       _computeTerminal(selectedTerminal, terminals) {
         if (_.isEmpty(terminals))
           return {};
-
         return terminals[selectedTerminal];
       },
       terminalsOffice(terminal) {
@@ -289,6 +345,7 @@
         }
 
         //@NOTE: may had bug here if services has two equal fields with different logic
+        services_fields.push(this.terminal.workstation.custom_fields);
         let custom_fields = _.defaults.apply(_, services_fields);
 
         if (_.isEmpty(custom_fields))
