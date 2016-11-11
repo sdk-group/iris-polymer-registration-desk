@@ -1,4 +1,7 @@
 <link rel="import" href="../polymer/polymer.html">
+
+<link rel="import" href="../terminal-printable-ticket/terminal-printable-ticket.html">
+
 <link rel="import" href="registration-fields.html">
 
 <dom-module id="iris-registration-desk">
@@ -96,6 +99,9 @@
       }
 
     </style>
+
+    <terminal-printable-ticket id="printer" template-name="{{computedTicketTemplate}}"></terminal-printable-ticket>
+
     <paper-dialog id="ticketDialog" entry-animation="slide-from-left-animation" exit-animation="slide-left-animation" on-ticket-action="ticketAction">
       <div class='dialog-head'>
         <paper-fab class="flat" mini icon="chevron-left" elevation="0" on-tap="closeList"></paper-fab>
@@ -113,10 +119,10 @@
 
     <iris-shared-entities id="departments" namespace="departments"></iris-shared-entities>
     <iris-shared-entities id="services" namespace="services"></iris-shared-entities>
+
     <iron-pages selected="[[page]]">
       <div id="first-page">
         <paper-card id="terminal-list">
-
           <paper-dropdown-menu>
             <paper-listbox class="dropdown-content" selected="{{selectedTerminal}}">
               <template is="dom-repeat" items="[[terminals]]" as="terminal">
@@ -124,7 +130,6 @@
               </template>
             </paper-listbox>
           </paper-dropdown-menu>
-
         </paper-card>
 
         <paper-card id="services-list">
@@ -148,11 +153,11 @@
       </div>
       <div>
         <div id="user-fields">
-          <registration-feilds id="fields" service="[[service]]" fields-model="[[fieldsModel]]" selection-enabled="{{selectionEnabled}}" service-fields="{{serviceFields}}" terminal="[[terminal]]" ticket-query="{{ticketQuery}}">
+          <registration-feilds id="fields" service="[[service]]" method="[[method]]" fields-model="[[fieldsModel]]" selection-enabled="{{selectionEnabled}}" service-fields="{{serviceFields}}" terminal="[[terminal]]" ticket-query="{{ticketQuery}}">
             <paper-button on-tap="prevPage" raised>Назад</paper-button>
             <paper-button raised on-tap="register" disabled$="[[!selectionEnabled]]">Зарегистрировать</paper-button>
+            <paper-button raised on-tap="registerAndPrint" disabled$="[[!selectionEnabled]]">Зарегистрировать и напечатать</paper-button>
           </registration-feilds>
-
         </div>
       </div>
     </iron-pages>
@@ -163,6 +168,10 @@
     Polymer({
       is: 'iris-registration-desk',
       properties: {
+        method: {
+          type: String,
+          value: "live"
+        },
         terminals: {
           type: Array,
           observer: "_terminalsChanged"
@@ -191,7 +200,18 @@
         serviceFields: {
           type: Object,
           value: {}
+        },
+        computedTicketTemplate: {
+          type: String,
+          computed: 'computeTicketTemplate(terminal,method)'
         }
+      },
+      computeTicketTemplate(terminal, booking_method) {
+        let prefix = _.get(terminal, ['workstation', 'ticket_design']) || '';
+
+        return prefix
+          ? `${prefix}-${booking_method}`
+          : booking_method;
       },
       makeServiceFilter(sgfilter) {
         let string = sgfilter.toLowerCase();
@@ -206,6 +226,7 @@
       },
       ready() {
         this.toggleIcon = "expand-less";
+        this.$.printer.style.display = "none";
         this.page = 0;
       },
       canNext(service) {
@@ -214,19 +235,39 @@
       register() {
         this.ticketQuery.workstation = this.terminal.workstation.id;
 
-        return this.$.callcenter.confirm(this.ticketQuery, false, this.fieldsModel).then(response => {
+        return this.$.callcenter.confirm(this.ticketQuery, this.method == "live", this.fieldsModel).then(response => {
           console.log('Response:', response);
 
           if (!response.success) {
             this.$.error.open();
-            return;
+            return response;
           }
 
           let ticket = _.isArray(response.ticket)
             ? _.head(response.ticket)
             : response.ticket;
+
           this.set('selectedTicket', ticket);
           this.$.ticketDialog.open();
+
+          return response;
+        });
+      },
+      registerAndPrint() {
+        this.register().then(response => {
+          if (!response.success)
+            return;
+
+          let tickets = _.castArray(response.ticket);
+          let contexts = _.castArray(response.context);
+
+          this.$.printer.style.display = "block";
+          _.forEach(tickets, (ticket, index) => {
+            let context = contexts[index];
+            this.$.printer.init(ticket, context);
+            this.$.printer.print();
+          });
+          this.$.printer.style.display = "none";
         });
       },
       closeList() {
@@ -244,7 +285,19 @@
         this.set('ticketQuery.service_count', 1);
 
         this.$.fields.reset();
-        this.set('page', 1);
+        if (this.method == "prebook") {
+          this.set('page', 1);
+          return;
+        }
+
+        this.$.callcenter.checkAvailability(this.ticketQuery).then(d => {
+          if (d) {
+            this.set('page', 1);
+          } else {
+            this.$.error.open();
+          }
+        });
+
       },
       prevPage() {
         this.set('page', 0);

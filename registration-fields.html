@@ -56,39 +56,40 @@
     </style>
     <iris-call-center id="callcenter"></iris-call-center>
 
-    <paper-card id="date-picker">
+    <paper-card id="date-picker" hidden$="[[isLive(method)]]">
       <div>
         <paper-icon-button disabled$="[[canPrevMonth(monthFromNow)]]" on-tap="prevMonth" icon="chevron-left"></paper-icon-button>
         [[monthName(monthFromNow)]]
         <paper-icon-button disabled$="[[canNextMonth(monthFromNow,isLastAvailable)]]" on-tap="nextMonth" icon="chevron-right"></paper-icon-button>
       </div>
-      <iris-date-picker id="picker" hide-month-picker date="{{pickerDate}}" selection-enabled="{{selectionEnabled}}" available-days="{{availableDays}}" selected="{{ticketQuery.dedicated_date}}"></iris-date-picker>
+      <iris-date-picker id="picker" hide-month-picker date="{{pickerDate}}" selection-enabled="{{dayAvailable}}" available-days="{{availableDays}}" selected="{{ticketQuery.dedicated_date}}"></iris-date-picker>
     </paper-card>
 
     <paper-card id="other-fields">
+
       <paper-input label="Количество дел" value="{{ticketQuery.service_count}}"></paper-input>
 
       <template is="dom-repeat" items="[[fieldsModel]]" filter="otherFields">
         <paper-input class="custom-field" label="[[item.description]]" on-keyup="fieldChanged"></paper-input>
       </template>
 
-      <div id="time-picker">
+      <div id="time-picker" hidden$="[[isLive(method)]]">
         <div id="start-time">
-          <paper-dropdown-menu label="Часы" disabled$="[[!selectionEnabled]]">
+          <paper-dropdown-menu label="Часы" disabled$="[[!isTimeEnabled(dayAvailable, timeAvailable)]]">
             <paper-listbox class="dropdown-content" selected="{{hour}}">
               <template id="hours" is="dom-repeat" items="[[getHours(slots)]]">
                 <paper-item time$="[[item]]">[[item]]</paper-item>
               </template>
             </paper-listbox>
           </paper-dropdown-menu>
-
-          <paper-dropdown-menu id="minutes" label="Минуты" disabled$="[[!selectionEnabled]]">
+          <paper-dropdown-menu id="minutes" label="Минуты" disabled$="[[!isTimeEnabled(dayAvailable, timeAvailable)]]">
             <paper-listbox class="dropdown-content" selected="{{minute}}">
               <template id="selectedTime" is="dom-repeat" items="[[pickedHour(slots, hour)]]">
                 <paper-item >[[item.start.minute]]</paper-item>
               </template>
             </paper-listbox>
           </paper-dropdown-menu>
+          <paper-spinner active hidden$="[[timeAvailable]]"></paper-spinner>
         </div>
 
         <div id="end-time">
@@ -112,10 +113,18 @@
 
           value: {}
         },
+        method: {
+          type: String,
+          value: 'live'
+        },
+        dayAvailable: {
+          value: false,
+          type: Boolean
+        },
         selectionEnabled: {
           type: Boolean,
           notify: true,
-          value: false
+          computed: '_computeSelectionAvailability(dayAvailable, timeAvailable, method)'
         },
         fieldsModel: {
           type: Array
@@ -129,6 +138,10 @@
         monthFromNow: {
           type: Number,
           value: 0
+        },
+        timeAvailable: {
+          value: true,
+          type: Boolean
         }
       },
       observers: [
@@ -136,6 +149,17 @@
         'getSlots(ticketQuery.dedicated_date,ticketQuery.service_count)', //
         'updateTicketQuery(minute)'
       ],
+      isTimeEnabled(dayAvailable, timeAvailable) {
+        return dayAvailable && timeAvailable;
+      },
+      _computeSelectionAvailability(dayAvailable, timeAvailable, method) {
+        return method == "live"
+          ? true
+          : dayAvailable && timeAvailable;
+      },
+      isLive(method) {
+        return method == 'live';
+      },
       updateTicketQuery(minute) {
         if (minute === '')
           return;
@@ -152,6 +176,8 @@
         this.set('ticketQuery.' + key, e.target.value);
       },
       getAvailableDays(service, serviceCount) {
+        if (this.method != "prebook")
+          return;
         let info = this.monthInfo(this.monthFromNow);
 
         // this.$.picker.selections = [];
@@ -225,7 +251,10 @@
         return slots[hour];
       },
       getSlots() {
+        this.timeAvailable = false;
         return this.$.callcenter.getDaySlots(this.ticketQuery).then(response => {
+
+          this.timeAvailable = true;
           let result = response.success && _.chain(response.slots). //
           map('time_description'). //
           map(item => ({
@@ -262,12 +291,19 @@
       },
 
       reset() {
+        let reset = this["reset" + this.method];
+        reset.call(this);
+        let fields = this.$["other-fields"].querySelectorAll('.custom-field');
+        _.forEach(fields, field => field.set('value', ''))
+
+      },
+      resetlive() {
+        this.ticketQuery.workstation = this.terminal.workstation.id;
+      },
+      resetprebook() {
         this.set("monthFromNow", 0);
         this.$.picker.reset();
         this.set("hour", null);
-
-        let fields = this.$["other-fields"].querySelectorAll('.custom-field');
-        _.forEach(fields, field => field.set('value', ''))
       }
     });
   </script>
