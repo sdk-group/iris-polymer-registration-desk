@@ -1,0 +1,58 @@
+<link rel="import" href="../polymer/polymer.html">
+
+<dom-module id="iris-masked-input">
+  <template>
+    <style>
+      :host {
+        display: block;
+      }
+
+    </style>
+    <template is="dom-repeat" items="[[parts]]">
+      <span>[[item.prefix]]</span>
+      <template is="dom-repeat" items="[[hasLength(item)]]">
+        <input is="iron-input" maxlength="[[item.length]]" bind-value="{{item.value}}"/>
+      </template>
+    </template>
+  </template>
+  <script>
+    Polymer({
+      is: 'iris-masked-input',
+      properties: {
+        mask: {
+          type: String,
+          value: ''
+        },
+        parts: {
+          type: Array,
+          computed: '_computeParts(mask)',
+          value: []
+        }
+      },
+      hasLength(item) {
+        return !!item.length;
+      },
+      _computeParts() {
+        if (!mask) {
+          return [
+            {
+              prefix: ''
+            }
+          ];
+        }
+
+        let result = _.reduce(mask.split(/(\*)+/), (acc, prefix, index) => {
+          if (prefix != '*') {
+            acc.push({prefix: prefix, length: false});
+          }
+          return acc;
+        }, []);
+
+        _.forEach(mask.match(/(\*)+/g), (item, index) => result[index].length = item.length);
+
+        return result;
+      }
+
+    });
+  </script>
+</dom-module>

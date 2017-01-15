@@ -5,6 +5,20 @@
     <style>
       :host {
         @apply(--layout-horizontal);
+        --paper-spinner-layer-1-color: var(--mydoc-beige-1000);
+        --paper-spinner-layer-2-color: var(--mydoc-beige-800);
+        --paper-spinner-layer-3-color: var(--mydoc-beige-600);
+        --paper-spinner-layer-4-color: var(--mydoc-beige-400);
+        --paper-input-container-input-webkit-spinner: {
+          -webkit-appearance: none;
+          margin: 0;
+        };
+        --paper-input-container-input: {
+          -moz-appearance: textfield;
+        };
+        --paper-input-char-counter: {
+          display: none;
+        }
       }
 
       #other-fields {
@@ -40,7 +54,7 @@
         padding: 10px;
         @apply(--layout-horizontal);
         @apply(--layout-end-justified);
-        margin: 0 -10px;
+        margin: 20px -10px 0;
       }
 
       #end-time {
@@ -67,10 +81,22 @@
 
     <paper-card id="other-fields">
 
-      <paper-input label="Количество дел" value="{{ticketQuery.service_count}}"></paper-input>
-
       <template is="dom-repeat" items="[[fieldsModel]]" filter="otherFields">
-        <paper-input class="custom-field" label="[[item.description]]" on-keyup="fieldChanged"></paper-input>
+        <paper-input
+          char-counter
+          class="custom-field"
+          label="[[item.description]]"
+          on-keyup="fieldChanged"
+          value="[[item.default]]"
+          maxlength="[[computeLength(item,'max')]]"
+          error-message="Поле заполнено не верно"
+          auto-validate
+          max="[[computeValue(item,'max')]]"
+          min="[[computeValue(item,'min')]]"
+          type="[[computeType(item)]]"
+          required="[[item.required]]"
+          pattern="[[computePattern(item)]]"
+          minlength="[[computeLength(item,'min')]]"></paper-input>
       </template>
 
       <div id="time-picker" hidden$="[[isLive(method)]]">
@@ -110,8 +136,9 @@
         ticketQuery: {
           type: Object,
           notify: true,
-
-          value: {}
+          value: function () {
+            return {};
+          }
         },
         method: {
           type: String,
@@ -124,7 +151,7 @@
         selectionEnabled: {
           type: Boolean,
           notify: true,
-          computed: '_computeSelectionAvailability(dayAvailable, timeAvailable, method)'
+          computed: '_computeSelectionAvailability(dayAvailable, timeAvailable, method,validInput)'
         },
         fieldsModel: {
           type: Array
@@ -142,23 +169,93 @@
         timeAvailable: {
           value: true,
           type: Boolean
+        },
+        validInput: {
+          value: true,
+          type: Boolean
         }
       },
       observers: [
         'getAvailableDays(service,ticketQuery.service_count,monthFromNow)', //
         'getSlots(ticketQuery.dedicated_date,ticketQuery.service_count)', //
-        'updateTicketQuery(minute)'
+        'updateTicketQuery(minute)',
+        'validateFields(ticketQuery.*)'
       ],
+      validateFields() {
+        _.forEach(this.$["other-fields"].querySelectorAll('input'), (input) => {
+          let maxlength = input.getAttribute('maxlength');
+          if (maxlength) {
+            input.setAttribute('maxlength', false);
+            input.setAttribute('maxlength', maxlength);
+          }
+        });
+
+        let fields = this.$["other-fields"].querySelectorAll('.custom-field');
+        let validation_result = true;
+
+        _.forEach(fields, (field, index) => {
+          validation_result = field.validate();
+          return validation_result;
+        });
+
+        let is_time_valid = (_.isArray(this.ticketQuery.time_description) || this.method == "live");
+        // console.log('time valid', is_time_valid); console.log('validation result', validation_result);
+
+        validation_result = validation_result && is_time_valid;
+
+        this.set('validInput', validation_result);
+      },
       isTimeEnabled(dayAvailable, timeAvailable) {
         return dayAvailable && timeAvailable;
       },
-      _computeSelectionAvailability(dayAvailable, timeAvailable, method) {
+      _computeSelectionAvailability(dayAvailable, timeAvailable, method, validInput) {
+
         return method == "live"
-          ? true
-          : dayAvailable && timeAvailable;
+          ? validInput
+          : dayAvailable && timeAvailable && validInput;
       },
       isLive(method) {
         return method == 'live';
+      },
+      computePattern(item) {
+        let len = this.computeLength(item);
+
+        let mult = !len
+          ? "*"
+          : `{${len}}`;
+
+        return item.layout == 'numeric'
+          ? '[0-9]' + mult
+          : undefined;
+      },
+      computeType(item) {
+
+        return item.type == "input-number"
+          ? 'number'
+          : 'text';
+      },
+      computeValue(item, direction) {
+        if (item[direction + '-value']) {
+          return parseInt(item[direction + '-value'], 10);
+        }
+
+        if (direction == "min" && item.type == "input-number")
+          return 1;
+
+        return undefined;
+      },
+      computeLength(item, direction) {
+        if (!!item.mask) {
+          return _.sumBy(item.mask, i => i == '*'
+            ? 1
+            : 0);
+        }
+
+        if (!!item.length) {
+          return item.length;
+        }
+
+        return undefined;
       },
       updateTicketQuery(minute) {
         if (minute === '')
@@ -186,11 +283,11 @@
 
         this.ticketQuery.start = this.monthFromNow === 0
           ? 0
-          : this.ticketQuery.end + 1;
+          : this.ticketQuery.start;
 
         this.ticketQuery.end = this.monthFromNow === 0
           ? info.days_in_month - info.day
-          : info.days_in_month + this.ticketQuery.end + 1;
+          : this.ticketQuery.end;
 
         return this.$.callcenter.prebookAvailable(this.ticketQuery).then(data => this.processAvailableDays(data));
       },
@@ -228,6 +325,15 @@
         this.set('ticketQuery.dedicated_date', null);
         this.monthFromNow = this.monthFromNow + v;
         this.pirckerDate = moment().add(this.monthFromNow, 'month');
+
+        let info = this.monthInfo(this.monthFromNow);
+        this.ticketQuery.start = this.monthFromNow === 0
+          ? 0
+          : this.ticketQuery.end + 1;
+
+        this.ticketQuery.end = this.monthFromNow === 0
+          ? info.days_in_month - info.day
+          : info.days_in_month + this.ticketQuery.end + 1;
       },
       monthName() {
         return moment().add(this.monthFromNow, 'month').format('MMMM')
@@ -236,7 +342,7 @@
         return item.type == "date-picker";
       },
       otherFields(item) {
-        return item.type != "date-picker" && item.type != "input-number";
+        return item.type != "date-picker";
       },
       pickedHour(slots, index) {
         let hour = this.$.hours.items[index];
@@ -251,6 +357,9 @@
         return slots[hour];
       },
       getSlots() {
+        if (this.ticketQuery.dedicated_date === false)
+          return;
+
         this.timeAvailable = false;
         return this.$.callcenter.getDaySlots(this.ticketQuery).then(response => {
 
@@ -263,6 +372,7 @@
           })). //
           groupBy('start.hour'). //
           value();
+          this.set('ticketQuery.time_description', false);
           this.set("hour", null);
           this.set('slots', result);
         });
@@ -289,16 +399,28 @@
         };
         return ts;
       },
-
       reset() {
+        console.log("reset" + this.method);
         let reset = this["reset" + this.method];
         reset.call(this);
-        let fields = this.$["other-fields"].querySelectorAll('.custom-field');
-        _.forEach(fields, field => field.set('value', ''))
 
+        let fields = this.$["other-fields"].querySelectorAll('.custom-field');
+
+        _.forEach(fields, (field, index) => field.set('value', this.fieldsModel[index].default || ''));
+
+        _.forEach(this.$["other-fields"].querySelectorAll('input'), (input) => {
+          let maxlength = input.getAttribute('maxlength');
+          if (maxlength) {
+            input.setAttribute('maxlength', false);
+            input.setAttribute('maxlength', maxlength);
+          }
+        });
       },
       resetlive() {
         this.ticketQuery.workstation = this.terminal.workstation.id;
+      },
+      resetregister() {
+        this.resetprebook();
       },
       resetprebook() {
         this.set("monthFromNow", 0);

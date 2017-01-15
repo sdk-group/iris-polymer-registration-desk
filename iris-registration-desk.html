@@ -1,8 +1,10 @@
 <link rel="import" href="../polymer/polymer.html">
 
 <link rel="import" href="../terminal-printable-ticket/terminal-printable-ticket.html">
+<link rel="import" href="../iris-polymer-fields-model-processor/iris-fields-model-processor.html">
 
 <link rel="import" href="registration-fields.html">
+<link rel="import" href="registration-desk-messages.html">
 
 <dom-module id="iris-registration-desk">
   <template>
@@ -101,6 +103,7 @@
     </style>
 
     <terminal-printable-ticket id="printer" template-name="{{computedTicketTemplate}}"></terminal-printable-ticket>
+    <iris-fields-model-processor computed-model="{{computedFieldsModel}}" booking-method="{{method}}" fields-model="{{terminal.fields_model}}" service="{{service.id}}"></iris-fields-model-processor>
 
     <paper-dialog id="ticketDialog" entry-animation="slide-from-left-animation" exit-animation="slide-left-animation" on-ticket-action="ticketAction">
       <div class='dialog-head'>
@@ -115,7 +118,13 @@
 
     </paper-dialog>
 
-    <iris-call-center id="callcenter" terminals="{{terminals}}"></iris-call-center>
+    <template is="dom-if" if="[[isRegister(method)]]">
+      <iris-register id="callcenter" terminals="{{terminals}}"></iris-register>
+    </template>
+
+    <template is="dom-if" if="[[!isRegister(method)]]">
+      <iris-call-center id="callcenter" terminals="{{terminals}}"></iris-call-center>
+    </template>
 
     <iris-shared-entities id="departments" namespace="departments"></iris-shared-entities>
     <iris-shared-entities id="services" namespace="services"></iris-shared-entities>
@@ -137,9 +146,9 @@
             Услуга: [[getSelectedServiceName(service)]]
           </div>
           <paper-input label="Название услуги" value="{{sgfilter}}"></paper-input>
-          <paper-listbox class="list" selected-item="{{selectedService}}">
+          <paper-listbox id="servicesList" class="list" selected-item="{{selectedService}}" selected="{{selectedIndex}}" attr-for-selected="service-id">
             <template id="visibleServices" is="dom-repeat" items="[[terminal.views.base.root.content]]" filter="[[makeServiceFilter(sgfilter)]]">
-              <paper-item>
+              <paper-item service-id$="[[item.id]]">
                 [[serviceLabel(item)]]
               </paper-item>
             </template>
@@ -155,267 +164,273 @@
         <div id="user-fields">
           <registration-feilds id="fields" service="[[service]]" method="[[method]]" fields-model="[[fieldsModel]]" selection-enabled="{{selectionEnabled}}" service-fields="{{serviceFields}}" terminal="[[terminal]]" ticket-query="{{ticketQuery}}">
             <paper-button on-tap="prevPage" raised>Назад</paper-button>
-            <paper-button raised on-tap="register" disabled$="[[!selectionEnabled]]">Зарегистрировать</paper-button>
-            <paper-button raised on-tap="registerAndPrint" disabled$="[[!selectionEnabled]]">Зарегистрировать и напечатать</paper-button>
+            <paper-button raised on-tap="register" disabled$="[[registerLocked(selectionEnabled, processingRequest)]]">Зарегистрировать</paper-button>
+            <paper-button raised on-tap="registerAndPrint" disabled$="[[registerLocked(selectionEnabled,processingRequest)]]">Зарегистрировать и напечатать</paper-button>
           </registration-feilds>
         </div>
       </div>
     </iron-pages>
 
-    <paper-toast id="error" text="Невозможно зарегистрировать талон"></paper-toast>
+    <paper-toast id="error" text="[[errorText]]"></paper-toast>
   </template>
   <script>
-    Polymer({
-      is: 'iris-registration-desk',
-      properties: {
-        method: {
-          type: String,
-          value: "live"
-        },
-        terminals: {
-          type: Array,
-          observer: "_terminalsChanged"
-        },
-        terminal: {
-          type: Object,
-          computed: "_computeTerminal(selectedTerminal, terminals)"
-        },
-        service: {
-          type: Object,
-          computed: "_computeService(selectedService,terminal)",
-          value: false
-        },
-        booking_method: {
-          value: 'prebook',
-          type: String
-        },
-        fieldsModel: {
-          type: Array,
-          computed: "_modelByMethod(terminal.fields_model,booking_method,service.id)"
-        },
-        monthFromNow: {
-          type: Number,
-          value: 0
-        },
-        serviceFields: {
-          type: Object,
-          value: {}
-        },
-        computedTicketTemplate: {
-          type: String,
-          computed: 'computeTicketTemplate(terminal,method)'
-        }
-      },
-      computeTicketTemplate(terminal, booking_method) {
-        let prefix = _.get(terminal, ['workstation', 'ticket_design']) || '';
+    (function () {
+      let messages = IRIS._translation.registrationDeskMessages;
+      Polymer({
+        is: 'iris-registration-desk',
+        properties: {
+          method: {
+            type: String,
+            value: "live"
+          },
+          processingRequest: {
+            type: Boolean,
+            value: false
+          },
+          errorText: {
+            type: String,
+            value: "Невозможно зарегистрировать талон"
+          },
+          terminals: {
+            type: Array,
+            observer: "_terminalsChanged"
+          },
+          terminal: {
+            type: Object,
+            computed: "_computeTerminal(selectedTerminal, terminals)"
+          },
+          service: {
+            type: Object,
+            computed: "_computeService(selectedIndex,terminal)",
+            value: false
+          },
 
-        return prefix
-          ? `${prefix}-${booking_method}`
-          : booking_method;
-      },
-      makeServiceFilter(sgfilter) {
-        let string = sgfilter.toLowerCase();
-
-        return (item) => {
-          if (!string)
-            return true;
-          let label = this.serviceLabel(item).toLowerCase();
-
-          return ! !~ label.indexOf(string);
-        };
-      },
-      ready() {
-        this.toggleIcon = "expand-less";
-        this.$.printer.style.display = "none";
-        this.page = 0;
-      },
-      canNext(service) {
-        return !_.isEmpty(service)
-      },
-      register() {
-        this.ticketQuery.workstation = this.terminal.workstation.id;
-
-        return this.$.callcenter.confirm(this.ticketQuery, this.method == "live", this.fieldsModel).then(response => {
-          console.log('Response:', response);
-
-          if (!response.success) {
-            this.$.error.open();
-            return response;
+          fieldsModel: {
+            type: Array,
+            computed: "_modelToArray(computedFieldsModel)"
+          },
+          monthFromNow: {
+            type: Number,
+            value: 0
+          },
+          serviceFields: {
+            type: Object,
+            value: {}
+          },
+          computedTicketTemplate: {
+            type: String,
+            computed: 'computeTicketTemplate(terminal,print_method)'
           }
+        },
+        listeners: {
+          'after-logout': 'reset'
+        },
+        reset() {
+          this.$.fields.reset();
+          this.set('page', 0);
+        },
+        isRegister(method) {
+          return method == 'live';
+        },
+        registerLocked(a, b) {
+          return !a || b;
+        },
+        computeTicketTemplate(terminal, method) {
+          let prefix = _.get(terminal, ['workstation', 'ticket_design']) || '';
 
-          let ticket = _.isArray(response.ticket)
-            ? _.head(response.ticket)
-            : response.ticket;
+          return prefix
+            ? `${prefix}-${method}`
+            : method;
+        },
+        makeServiceFilter(sgfilter) {
+          let string = sgfilter.toLowerCase();
+          this.set('selectedIndex', false);
 
-          this.set('selectedTicket', ticket);
-          this.$.ticketDialog.open();
-
-          return response;
-        });
-      },
-      registerAndPrint() {
-        this.register().then(response => {
-          if (!response.success)
-            return;
-
-          let tickets = _.castArray(response.ticket);
-          let contexts = _.castArray(response.context);
-
-          this.$.printer.style.display = "block";
-          _.forEach(tickets, (ticket, index) => {
-            let context = contexts[index];
-            this.$.printer.init(ticket, context);
-            this.$.printer.print();
-          });
-          this.$.printer.style.display = "none";
-        });
-      },
-      closeList() {
-        this.set('page', 0);
-        this.$.ticketDialog.close();
-      },
-      nextPage() {
-        _.forEach(this.ticketQuery, (field, name) => {
-          if (name == 'service')
-            return true;
-
-          this.set('ticketQuery.' + name, undefined);
-        });
-
-        this.set('ticketQuery.service_count', 1);
-
-        this.$.fields.reset();
-        if (this.method == "prebook") {
-          this.set('page', 1);
-          return;
-        }
-
-        this.$.callcenter.checkAvailability(this.ticketQuery).then(d => {
-          if (d) {
-            this.set('page', 1);
-          } else {
-            this.$.error.open();
-          }
-        });
-
-      },
-      prevPage() {
-        this.set('page', 0);
-      },
-      hasTicket(selectedTicket) {
-        return _.isEmpty(selectedTicket);
-      },
-      _terminalsChanged() {
-        this.set('selectedTerminal', 0);
-      },
-      _computeService(selectedService, terminal) {
-        let service = this.$.visibleServices.itemForElement(selectedService);
-        this.set('ticketQuery.service', service.id);
-
-        return service;
-      },
-      _computeTerminal(selectedTerminal, terminals) {
-        if (_.isEmpty(terminals))
-          return {};
-        return terminals[selectedTerminal];
-      },
-      terminalsOffice(terminal) {
-        if (_.isEmpty(terminal))
-          return;
-
-        let department_id = terminal.workstation.attached_to;
-        let department = this.$.departments.get(department_id);
-
-        return department.label;
-      },
-      serviceLabel(item) {
-        if (!item)
-          return;
-
-        let service = this.$.services.get(item.id);
-
-        return service
-          ? service.label
-          : item.id;
-      },
-      toggleServiceList() {
-        this.$.collapse.toggle();
-        this.toggleIcon = this.toggleIcon == "expand-less"
-          ? "expand-more"
-          : "expand-less";
-      },
-      getSelectedServiceName(selectedService) {
-        if (!selectedService)
-          return '-';
-
-        return this.serviceLabel(selectedService);
-      },
-      _modelByMethod(fields_model, booking_method, service) {
-        let fields = this.modelByMethod(fields_model, booking_method, service);
-
-        return _.map(fields, (field, index) => {
-          field.key = field.key || index;
-          return field;
-        });
-      },
-      modelByMethod(fieldsModel, booking_method, current_service_id) {
-
-        let comon_model = _.reduce(fieldsModel, (r, field, name) => {
-          if ((!field.method || field.method === booking_method) && (field.include !== false))
-            r[name] = field;
-          return r;
-        }, {});
-
-        if (!current_service_id)
-          return comon_model;
-
-        let service_array = _.castArray(current_service_id);
-        let servicesMap = this.$.services;
-        let services_fields = _.map(service_array, id => servicesMap.get(id).custom_fields);
-
-        let ext_model = {};
-        if (!_.isArray(current_service_id)) {
-          ext_model = comon_model
-        } else {
-          let multi_fields_list = ['service_count'];
-
-          _.forEach(comon_model, (field, name) => {
-            let key = field.key || name;
-            if (!~ multi_fields_list.indexOf(key)) {
-              ext_model[name] = field;
+          return (item) => {
+            if (!string)
               return true;
+            let label = this.serviceLabel(item).toLowerCase();
+
+            return ! !~ label.indexOf(string);
+          };
+        },
+        ready() {
+          this.toggleIcon = "expand-less";
+          this.$.printer.style.display = "none";
+          this.page = 0;
+        },
+        canNext(service) {
+          return !_.isEmpty(service)
+        },
+        register() {
+          this.ticketQuery.workstation = this.terminal.workstation.id;
+          this.set('processingRequest', true);
+
+          if (this.method == "live") {
+            if (this.ticketQuery.dedicated_date)
+              console.warn('dedicated_date on live ticket!');
+
+            this.ticketQuery.dedicated_date = undefined;
+          }
+          return this.querySelector('#callcenter').confirm(this.ticketQuery, this.method == "live", this.fieldsModel).then(response => {
+            console.log('Response:', response);
+
+            if (!response.success) {
+              this.parseError(response);
+              return response;
             }
 
-            _.forEach(current_service_id, (id, index) => {
-              let new_name = `${name}-${id}`;
-              let multi_field = _.cloneDeep(field);
-              multi_field.selected_service = index;
-              multi_field.key = key;
-              ext_model[new_name] = multi_field;
+            let ticket = _.isArray(response.ticket)
+              ? _.head(response.ticket)
+              : response.ticket;
+
+            this.set('selectedTicket', ticket);
+            this.$.ticketDialog.open();
+            this.set('page', 0);
+
+            return response;
+          }). finally(r => {
+            this.set('processingRequest', false);
+            return r;
+          });
+        },
+        parseError(response) {
+          let text = "Невозможно зарегистрировать талон";
+          if (!response || !response.reason) {
+            text = messages["error-unknown"].text;
+          } else if (~ (response.reason || '').indexOf("User info validation failed")) {
+            let [,
+              name] = response.reason.split(': ');
+            let label = this.computedFieldsModel[name].label;
+            let temp = _.template(messages["error-bad-field"].text);
+            text = temp({field_name: label});
+          } else if (response.reason == 'Failed to place a ticket.') {
+            text = messages["error-no-slot-" + this.method].text;
+          } else if (response.reason == 'no service.') {
+            text = messages["error-no-service-" + this.method].text;
+          }
+
+          this.set('errorText', text);
+          this.$.error.open();
+        },
+        registerAndPrint() {
+          this.register().then(response => {
+            if (!response.success)
+              return;
+
+            let tickets = _.castArray(response.ticket);
+            let contexts = _.castArray(response.context);
+
+            this.set('print_method', _.head(tickets).is_activated && this.method == 'prebook'
+              ? "register"
+              : this.method);
+
+            this.$.printer.style.display = "block";
+            _.forEach(tickets, (ticket, index) => {
+              let context = contexts[index];
+              this.$.printer.init(ticket, context);
+              this.$.printer.print();
             });
+            this.$.printer.style.display = "none";
+
+          });
+        },
+        closeList() {
+
+          this.$.ticketDialog.close();
+        },
+        nextPage() {
+
+          _.forEach(this.ticketQuery, (field, name) => {
+            if (name == 'service')
+              return true;
+
+            this.set('ticketQuery.' + name, undefined);
           });
 
-        }
+          this.set('ticketQuery.service_count', 1);
 
-        //@NOTE: may had bug here if services has two equal fields with different logic
-        services_fields.push(this.terminal.workstation.custom_fields);
-        let custom_fields = _.defaults.apply(_, services_fields);
-
-        if (_.isEmpty(custom_fields))
-          return ext_model;
-
-        _.forEach(custom_fields, (field, name) => {
-          if (field === false) {
-            delete ext_model[name];
-          } else if (field === true && fieldsModel[name]) {
-            ext_model[name] = fieldsModel[name];
-          } else if (_.isPlainObject(field))
-            ext_model[name] = field;
+          this.$.fields.reset();
+          if (this.method != "live") {
+            this.set('page', 1);
+            return;
           }
-        );
 
-        return ext_model;
-      }
-    });
+          this.ticketQuery.workstation = this.terminal.workstation.id;
+
+          this.querySelector('#callcenter').checkAvailability(this.ticketQuery).then(d => {
+
+            if (d) {
+              this.set('page', 1);
+              return;
+            }
+
+            this.parseError({reason: 'no service.'});
+          });
+
+        },
+        prevPage() {
+          this.set('page', 0);
+        },
+        hasTicket(selectedTicket) {
+          return _.isEmpty(selectedTicket);
+        },
+        _terminalsChanged() {
+          this.set('selectedTerminal', 0);
+        },
+        _computeService(id, terminal) {
+          if (id === false)
+            return false;
+
+          let service = _.find(this.$.visibleServices.items, ['id', id]);
+          this.set('ticketQuery.service', id);
+
+          return service;
+        },
+        _computeTerminal(selectedTerminal, terminals) {
+          return _.isEmpty(terminals)
+            ? {}
+            : terminals[selectedTerminal];
+        },
+        terminalsOffice(terminal) {
+          if (_.isEmpty(terminal))
+            return;
+
+          let department_id = terminal.workstation.attached_to;
+          let department = this.$.departments.get(department_id);
+
+          return department.label;
+        },
+        serviceLabel(item) {
+          if (!item)
+            return;
+
+          let service = this.$.services.get(item.id);
+
+          return service
+            ? service.label
+            : item.id;
+        },
+        toggleServiceList() {
+          this.$.collapse.toggle();
+          this.toggleIcon = this.toggleIcon == "expand-less"
+            ? "expand-more"
+            : "expand-less";
+        },
+        getSelectedServiceName(selectedService) {
+          if (!selectedService)
+            return '-';
+
+          return this.serviceLabel(selectedService);
+        },
+        _modelToArray(computedFieldsModel) {
+
+          return _.map(computedFieldsModel, (field, index) => {
+            field.key = field.key || index;
+            return field;
+          });
+        }
+      });
+    })();
   </script>
 </dom-module>
