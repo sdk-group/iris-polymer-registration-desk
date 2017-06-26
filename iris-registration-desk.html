@@ -326,13 +326,7 @@
               : this.method);
 
             this.$.printer.style.display = "block";
-            _.forEach(tickets, (ticket, index) => {
-              let context = contexts[index];
-              this.$.printer.init(ticket, context);
-              this.$.printer.print();
-            });
-            this.$.printer.style.display = "none";
-
+            this.$.printer.printAll(tickets, contexts).then(() => this.$.printer.style.display = "none");
           });
         },
         closeList() {

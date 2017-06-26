@@ -81,7 +81,7 @@
 
     <paper-card id="other-fields">
 
-      <template is="dom-repeat" items="[[fieldsModel]]" filter="otherFields">
+      <template id="inputs" is="dom-repeat" items="[[fieldsModel]]" filter="otherFields">
         <paper-input
           char-counter
           class="custom-field"
@@ -273,23 +273,25 @@
         this.set('ticketQuery.' + key, e.target.value);
       },
       getAvailableDays(service, serviceCount) {
-        if (this.method != "prebook")
-          return;
-        let info = this.monthInfo(this.monthFromNow);
+        this.debounce('av-days', () => {
+          if (this.method != "prebook")
+            return;
+          let info = this.monthInfo(this.monthFromNow);
 
-        // this.$.picker.selections = [];
-        this.pickerDate = info.now;
-        this.ticketQuery.workstation = this.terminal.workstation.id;
+          // this.$.picker.selections = [];
+          this.pickerDate = info.now;
+          this.ticketQuery.workstation = this.terminal.workstation.id;
 
-        this.ticketQuery.start = this.monthFromNow === 0
-          ? 0
-          : this.ticketQuery.start;
-
-        this.ticketQuery.end = this.monthFromNow === 0
-          ? info.days_in_month - info.day
-          : this.ticketQuery.end;
-
-        return this.$.callcenter.prebookAvailable(this.ticketQuery).then(data => this.processAvailableDays(data));
+          if (this.monthFromNow === 0) {
+            this.ticketQuery.start = 0;
+            this.ticketQuery.end = (info.days_in_month - info.day) || 1;
+          } else {
+            this.ticketQuery.start = info.whole_days;
+            this.ticketQuery.end = info.days_in_month + info.whole_days;
+          }
+          console.log('month info', info);
+          this.$.callcenter.prebookAvailable(this.ticketQuery).then(data => this.processAvailableDays(data));
+        }, 300);
       },
       processAvailableDays(data) {
         this.isLastAvailable = !data.done;
@@ -307,7 +309,15 @@
         let year = now.format('GGGG');
         let day = now.format('D');
         let days_in_month = new Date(year, month, 0).getDate();
-        return {now, days_in_month, day, year, month};
+        let whole_days = now.startOf('month').diff(moment(), 'days');
+        return {
+          now,
+          days_in_month,
+          day,
+          year,
+          month,
+          whole_days
+        };
       },
       canPrevMonth(x) {
         return x <= 0;
@@ -317,9 +327,11 @@
       },
       prevMonth() {
         this.makeDate(-1);
+        this.direction = "previous";
       },
       nextMonth() {
         this.makeDate(1);
+        this.direction = "next";
       },
       makeDate(v) {
         this.set('ticketQuery.dedicated_date', null);
@@ -391,19 +403,20 @@
           : '';
       },
       slotText(t) {
-
-        let ts = {
+        const ts = {
           hour: _.padStart(((t / 3600) | 0), 2, '0'),
           minute: _.padStart(((t % 3600) / 60) | 0, 2, '0'),
           raw: t
         };
+
         return ts;
       },
       reset() {
-        console.log("reset" + this.method);
         let reset = this["reset" + this.method];
-        reset.call(this);
 
+        this.hist = [];
+        reset.call(this);
+        this.$.inputs.render();
         let fields = this.$["other-fields"].querySelectorAll('.custom-field');
 
         _.forEach(fields, (field, index) => field.set('value', this.fieldsModel[index].default || ''));
@@ -429,4 +442,7 @@
       }
     });
   </script>
+</dom-module>
+this.set("hour", null); } });
+</script>
 </dom-module>
